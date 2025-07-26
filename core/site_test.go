@@ -163,10 +163,30 @@ func TestRequiredBatteryMode(t *testing.T) {
 }
 
 func TestUpdateHouseholdConsumption(t *testing.T) {
-	clock := clock.NewMock()
-
 	require.NoError(t, db.NewInstance("sqlite", ":memory:"))
 	metrics.Init()
+
+	requireNumRows := func(n int) {
+		db, err := db.Instance.DB()
+		require.NoError(t, err)
+
+		rows, err := db.Query(`SELECT min(ts) AS ts, avg(val) AS val
+		FROM meters
+		WHERE meter = ?
+		GROUP BY strftime("HH:MM", ts)
+		ORDER BY ts`, 1)
+		require.NoError(t, err)
+		defer rows.Close()
+
+		var count int
+		for rows.Next() {
+			count++
+		}
+		require.NoError(t, rows.Err())
+		require.Equal(t, n, count, "expected %d rows, got %d", n, count)
+	}
+
+	clock := clock.NewMock()
 
 	s := &Site{
 		log:             util.NewLogger("foo"),
@@ -185,8 +205,10 @@ func TestUpdateHouseholdConsumption(t *testing.T) {
 	clock.Add(5 * time.Minute)
 	s.updateHouseholdConsumption(1e3)
 	require.Equal(t, 0.0, s.householdEnergy.AccumulatedEnergy()) // accumulator reset after 15 minutes
+	requireNumRows(0)
 
 	clock.Add(15 * time.Minute)
 	s.updateHouseholdConsumption(1e3)
 	require.Equal(t, 0.0, s.householdEnergy.AccumulatedEnergy()) // accumulator reset after 15 minutes
+	requireNumRows(1)
 }
